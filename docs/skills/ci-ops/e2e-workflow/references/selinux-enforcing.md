@@ -29,10 +29,13 @@ printed as warnings and recorded, not failed: the operation was not blocked.
 
 ## Labeling harness files
 
-The runner has no SELinux, so every file the install step writes (`passwd`
-and `group` edits via `sed -i`, sshd drop-in, host keys, sudoers, GDM/SDDM
-config, masked-unit symlinks, the `bluefin-test` home) has no
-`security.selinux` xattr and would be `unlabeled_t` in the guest.
+The runner has no SELinux, so the files the install step writes under each
+deployment's `etc` and under `var` (`passwd` and `group` edits via `sed -i`,
+sshd drop-in, host keys, sudoers, GDM/SDDM config, masked-unit symlinks, the
+`bluefin-test` home) have no `security.selinux` xattr and would be
+`unlabeled_t` in the guest. Only those two trees are scanned and relabeled.
+The fallback `boot.N` symlinks under `/ostree/boot.*` stay unlabeled; they are
+read only by `ostree`/`bootc`, which run unconfined.
 
 1. Before any injection, record paths under each deployment's `etc/` and the
    stateroot `var/` that are already unlabeled (`baseline-unlabeled-*.txt`).
