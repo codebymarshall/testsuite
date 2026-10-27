@@ -206,7 +206,7 @@ The same rule applies to every other non-cone checkout in this repo, including t
    - Mounts the raw disk, finds `ROOT_UUID` (partition 3), ostree deployment hash, and `KVER`
    - Copies `vmlinuz` + `initramfs.img` from deployment `usr/lib/modules/<kver>/` (or boot partition fallback)
    - Creates `boot.N` symlinks needed by `ostree-system-generator` (including canonical `boot.N` alias for versioned `boot.N.M` dirs produced by newer bootc)
-   - Sets `KERNEL_ARGS` env (includes `root=UUID=...`, masked services, serial console, `selinux=0`)
+   - Sets `KERNEL_ARGS` env (includes `root=UUID=...`, masked services, serial console; no `selinux=0` — the guest boots with the candidate's own SELinux mode, see `references/selinux-enforcing.md`)
    - Iterates all deployment directories and writes: `bluefin-test` user (UID 1001, added to `wheel` like a real first-run admin account — common's `org.ublue.privileged.user.setup` polkit rule grants wheel only), GDM autologin, sshd drop-in `00-ci-auth.conf`, dconf `local.d/00-ci-testing` override, `tmpfiles.d/ci-user.conf`, masked service symlinks
    - Pre-installs `unsafe-mode@bluefin-test` gnome-shell extension files into var home (pre-boot, so gnome-shell finds it during `_loadExtensions()`)
    - Injects SSH authorized key into `/var/home/bluefin-test/.ssh/` and each deployment's `/etc/ssh/ci-authorized-keys`
