@@ -45,6 +45,19 @@ FILES_SIDEBAR_URIS = {
 }
 
 
+def _files_app_no_retry(name: str):
+    """Look up one top-level application by exact name, raising at once if absent.
+
+    ``tree.root.application(name)`` retries internally, so calling it per alias
+    inside a poll loop multiplies the caller's timeout when Files is absent.
+    """
+    return tree.root.findChild(
+        lambda n: (getattr(n, "name", "") or "").strip("'\" ") == name,
+        recursive=False,
+        retry=False,
+    )
+
+
 def _nautilus_app(timeout: int = 15):
     """Find the Files app in the AT-SPI tree, retrying for up to ``timeout`` seconds."""
     deadline = time.monotonic() + timeout
@@ -62,7 +75,7 @@ def _nautilus_app(timeout: int = 15):
             pass
         for name in FILES_APP_NAMES:
             try:
-                return tree.root.application(name)
+                return _files_app_no_retry(name)
             except Exception as exc:  # noqa: BLE001
                 last_error = exc
         if time.monotonic() >= deadline:
@@ -142,7 +155,7 @@ def files_is_no_longer_running(context) -> None:
 
         for name in FILES_APP_NAMES:
             try:
-                app = tree.root.application(name)
+                app = _files_app_no_retry(name)
                 frames = app.findChildren(lambda n: (getattr(n, "roleName", None) or getattr(n, "get_role_name", lambda: "")()) in {"frame", "filler"} and getattr(n, "showing", True))
                 if frames:
                     running = True

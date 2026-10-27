@@ -127,7 +127,7 @@ class TestNautilusApp:
     def test_returns_first_matching_app(self):
         mock_app = MagicMock()
         tree_mock = MagicMock()
-        tree_mock.root.application.return_value = mock_app
+        tree_mock.root.findChild.return_value = mock_app
         with patch.object(self.m, "tree", tree_mock):
             result = self.m._nautilus_app()
         assert result is mock_app
@@ -136,14 +136,14 @@ class TestNautilusApp:
         mock_app = MagicMock()
         call_count = {"n": 0}
 
-        def side_effect(name):
+        def side_effect(pred, **kwargs):
             call_count["n"] += 1
             if call_count["n"] == 1:
                 raise RuntimeError("not found")
             return mock_app
 
         tree_mock = MagicMock()
-        tree_mock.root.application.side_effect = side_effect
+        tree_mock.root.findChild.side_effect = side_effect
         with patch.object(self.m, "tree", tree_mock):
             result = self.m._nautilus_app()
         assert result is mock_app
@@ -161,10 +161,60 @@ class TestNautilusApp:
     def test_raises_assertion_error_when_all_names_fail(self):
         tree_mock = MagicMock()
         tree_mock.root.applications.return_value = []
-        tree_mock.root.application.side_effect = RuntimeError("not found")
+        tree_mock.root.findChild.side_effect = RuntimeError("not found")
         with patch.object(self.m, "tree", tree_mock):
             with pytest.raises(AssertionError, match="GNOME Files application was not found"):
                 self.m._nautilus_app(timeout=0)
+
+
+class TestMissingFilesRespectsWaitBudget:
+    """A missing Files app must not multiply waits through dogtail's own retries."""
+
+    @pytest.fixture
+    def clock(self, monkeypatch):
+        m = _import_files_steps()
+        clock = types.SimpleNamespace(now=100.0)
+
+        def advance(seconds):
+            clock.now += seconds
+
+        tree_mock = MagicMock()
+
+        def retrying_application(name):
+            advance(10)  # dogtail's default per-name retry loop
+            raise LookupError(name)
+
+        def missing_child(pred, **kwargs):
+            raise LookupError("not found")
+
+        tree_mock.root.application.side_effect = retrying_application
+        tree_mock.root.findChild.side_effect = missing_child
+        monkeypatch.setattr(m, "tree", tree_mock)
+        monkeypatch.setattr(m, "time", types.SimpleNamespace(monotonic=lambda: clock.now))
+        monkeypatch.setattr(m, "sleep", advance)
+        return m, clock, tree_mock
+
+    def test_nautilus_app_fails_within_timeout(self, clock):
+        m, clock, tree_mock = clock
+        tree_mock.root.applications.return_value = []
+
+        with pytest.raises(AssertionError, match="GNOME Files application was not found"):
+            m._nautilus_app(timeout=2)
+
+        assert clock.now - 100.0 == pytest.approx(2)
+        tree_mock.root.application.assert_not_called()
+        for call in tree_mock.root.findChild.call_args_list:
+            assert call.kwargs == {"recursive": False, "retry": False}
+
+    def test_no_longer_running_returns_without_retrying_lookup(self, clock):
+        m, clock, tree_mock = clock
+        tree_mock.root.applications = MagicMock()  # registry unavailable: fall back to per-name lookup
+
+        with patch("subprocess.run"), patch("shutil.which", return_value=None):
+            m.files_is_no_longer_running(MagicMock())
+
+        assert clock.now - 100.0 == pytest.approx(0.5)  # only the post-quit settle sleep
+        tree_mock.root.application.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -187,7 +237,7 @@ class TestNautilusWindow:
         app_mock = MagicMock()
         app_mock.findChildren.return_value = [frame]
         tree_mock = MagicMock()
-        tree_mock.root.application.return_value = app_mock
+        tree_mock.root.findChild.return_value = app_mock
         with patch.object(self.m, "tree", tree_mock), \
              patch("time.sleep"):
             result = self.m._nautilus_window(timeout=1)
@@ -198,7 +248,7 @@ class TestNautilusWindow:
         app_mock.findChildren.return_value = []
         app_mock.children = []
         tree_mock = MagicMock()
-        tree_mock.root.application.return_value = app_mock
+        tree_mock.root.findChild.return_value = app_mock
         with patch.object(self.m, "tree", tree_mock), \
              patch("time.sleep"):
             with pytest.raises(AssertionError, match="Visible Files window not found"):
@@ -299,7 +349,7 @@ class TestNautilusLocationShows:
         app_mock = MagicMock()
         app_mock.findChildren.return_value = [node]
         tree_mock = MagicMock()
-        tree_mock.root.application.return_value = app_mock
+        tree_mock.root.findChild.return_value = app_mock
         with patch.object(self.m, "tree", tree_mock), \
              patch("time.sleep"):
             self.m.nautilus_location_shows(MagicMock(), "Home")
@@ -308,7 +358,7 @@ class TestNautilusLocationShows:
         app_mock = MagicMock()
         app_mock.findChildren.return_value = []
         tree_mock = MagicMock()
-        tree_mock.root.application.return_value = app_mock
+        tree_mock.root.findChild.return_value = app_mock
         with patch.object(self.m, "tree", tree_mock), \
              patch("time.sleep"):
             with pytest.raises(AssertionError, match="does not show"):
@@ -325,7 +375,7 @@ class TestNautilusLocationShows:
 
         app_mock.findChildren.side_effect = find_children
         tree_mock = MagicMock()
-        tree_mock.root.application.return_value = app_mock
+        tree_mock.root.findChild.return_value = app_mock
         with patch.object(self.m, "tree", tree_mock), \
              patch("time.sleep"):
             self.m.nautilus_location_shows(MagicMock(), "home")
@@ -386,7 +436,7 @@ class TestNewFolderDialogIsOpen:
 
         app_mock.findChildren.side_effect = find
         tree_mock = MagicMock()
-        tree_mock.root.application.return_value = app_mock
+        tree_mock.root.findChild.return_value = app_mock
         with patch.object(self.m, "tree", tree_mock), \
              patch("time.sleep"):
             self.m.new_folder_dialog_is_open(MagicMock())
@@ -395,7 +445,7 @@ class TestNewFolderDialogIsOpen:
         app_mock = MagicMock()
         app_mock.findChildren.return_value = []
         tree_mock = MagicMock()
-        tree_mock.root.application.return_value = app_mock
+        tree_mock.root.findChild.return_value = app_mock
         with patch.object(self.m, "tree", tree_mock), \
              patch("time.sleep"):
             self.m.new_folder_dialog_is_open(MagicMock())
@@ -423,7 +473,7 @@ class TestFileSearchBarIsOpenInFiles:
 
         app_mock.findChildren.side_effect = find
         tree_mock = MagicMock()
-        tree_mock.root.application.return_value = app_mock
+        tree_mock.root.findChild.return_value = app_mock
         with patch.object(self.m, "tree", tree_mock), \
              patch("time.sleep"):
             self.m.file_search_bar_is_open_in_files(context)
@@ -433,7 +483,7 @@ class TestFileSearchBarIsOpenInFiles:
         app_mock = MagicMock()
         app_mock.findChildren.return_value = []
         tree_mock = MagicMock()
-        tree_mock.root.application.return_value = app_mock
+        tree_mock.root.findChild.return_value = app_mock
         with patch.object(self.m, "tree", tree_mock), \
              patch("time.sleep"):
             self.m.file_search_bar_is_open_in_files(MagicMock())
@@ -451,7 +501,7 @@ class TestFilesIsNoLongerRunning:
 
     def test_passes_immediately_when_app_not_found(self):
         tree_mock = MagicMock()
-        tree_mock.root.application.side_effect = RuntimeError("not found")
+        tree_mock.root.findChild.side_effect = RuntimeError("not found")
         with patch.object(self.m, "tree", tree_mock), \
              patch("time.sleep"):
             self.m.files_is_no_longer_running(MagicMock())
@@ -460,7 +510,7 @@ class TestFilesIsNoLongerRunning:
         app_mock = MagicMock()
         app_mock.findChildren.return_value = []
         tree_mock = MagicMock()
-        tree_mock.root.application.return_value = app_mock
+        tree_mock.root.findChild.return_value = app_mock
         with patch.object(self.m, "tree", tree_mock), \
              patch("time.sleep"):
             self.m.files_is_no_longer_running(MagicMock())
@@ -476,7 +526,7 @@ class TestFilesIsNoLongerRunning:
 
         app_mock.findChildren.side_effect = find
         tree_mock = MagicMock()
-        tree_mock.root.application.return_value = app_mock
+        tree_mock.root.findChild.return_value = app_mock
         with patch.object(self.m, "tree", tree_mock), \
              patch("time.sleep"), \
              patch("subprocess.run"):

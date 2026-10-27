@@ -380,3 +380,44 @@ class TestWindowDeadline:
         wait = m._wait_for_window_or_title if fallback else m._wait_for_window
 
         assert wait(m.FILES_APP_NAMES, {"Home"}, "Files", timeout=0.25) is frame
+
+
+class TestWaitForAppToCloseBudget:
+    """A missing app must not multiply the close wait through dogtail's own retries."""
+
+    def test_missing_app_returns_without_retrying_lookup(self, monkeypatch):
+        m = _import_gnome_apps()
+        clock = types.SimpleNamespace(now=100.0)
+
+        def advance(seconds):
+            clock.now += seconds
+
+        def retrying_application(name):
+            advance(10)  # dogtail's default per-name retry loop
+            raise LookupError(name)
+
+        monkeypatch.setattr(m, "sleep", advance)
+        m.tree.root.applications = MagicMock()  # registry unavailable: fall back to per-name lookup
+        m.tree.root.application.side_effect = retrying_application
+        m.tree.root.findChild.return_value = None
+
+        m._wait_for_app_to_close(m.FILES_APP_NAMES, "Files")
+
+        assert clock.now == 100.0
+        m.tree.root.application.assert_not_called()
+        assert m.tree.root.findChild.call_count == len(m.FILES_APP_NAMES)
+        for call in m.tree.root.findChild.call_args_list:
+            assert call.kwargs == {"recursive": False, "retry": False}
+
+    def test_visible_app_still_blocks_close(self, monkeypatch):
+        m = _import_gnome_apps()
+        monkeypatch.setattr(m, "sleep", lambda _s: None)
+        frame = types.SimpleNamespace(roleName="frame", showing=True)
+        app = MagicMock()
+        app.findChildren.side_effect = lambda pred: [frame] if pred(frame) else []
+        m.tree.root.applications = MagicMock()
+        m.tree.root.findChild.return_value = app
+
+        with pytest.raises(AssertionError, match="Files is still visible"):
+            m._wait_for_app_to_close(m.FILES_APP_NAMES, "Files")
+        m.tree.root.application.assert_not_called()

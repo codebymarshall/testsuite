@@ -277,6 +277,25 @@ def _wait_for_window_or_title(
     )
 
 
+def _app_no_retry(name: str):
+    """Look up one top-level application by exact name without dogtail's retries.
+
+    ``tree.root.application(name)`` retries internally, so calling it per alias
+    inside a poll loop multiplies the caller's timeout when the app is absent.
+    """
+    find_child = getattr(tree.root, "findChild", None)
+    if find_child is None:
+        return None
+    try:
+        return find_child(
+            lambda n: (getattr(n, "name", "") or "").strip("'\" ") == name,
+            recursive=False,
+            retry=False,
+        )
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _wait_for_app_to_close(app_names: tuple[str, ...], label: str) -> None:
     for _ in range(20):
         running = False
@@ -296,12 +315,9 @@ def _wait_for_app_to_close(app_names: tuple[str, ...], label: str) -> None:
 
         for name in app_names:
             try:
-                found = getattr(tree.root, "findChild", lambda *a, **kw: None)(
-                    lambda n: (getattr(n, "name", "") or "").strip("'\" ") == name,
-                    recursive=False,
-                    retry=False,
-                )
-                app = found if found is not None else tree.root.application(name)
+                app = _app_no_retry(name)
+                if app is None:
+                    continue
                 frames = app.findChildren(
                     lambda n: (getattr(n, "roleName", None) or getattr(n, "get_role_name", lambda: "")()) in FRAME_ROLES and getattr(n, "showing", True)
                 )

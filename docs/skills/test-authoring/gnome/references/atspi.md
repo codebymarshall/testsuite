@@ -28,6 +28,9 @@ Use one monotonic elapsed-time deadline for the complete lookup. Each polling at
 uses a single-shot application snapshot (`tree.root.applications()`) and no-raise
 `findChildren` discovery; `tree.root.application(name)` has its own default retries,
 so calling it for every alias inside a poll loop multiplies the declared timeout.
+When a per-name fallback is needed inside a loop (the close waiters and
+`_nautilus_app()`), use `tree.root.findChild(pred, recursive=False, retry=False)`
+instead, so a missing app fails each attempt immediately.
 
 **Standalone app lookup pattern:**
 
