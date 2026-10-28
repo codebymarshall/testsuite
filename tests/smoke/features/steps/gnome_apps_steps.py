@@ -282,18 +282,16 @@ def _app_no_retry(name: str):
 
     ``tree.root.application(name)`` retries internally, so calling it per alias
     inside a poll loop multiplies the caller's timeout when the app is absent.
+    dogtail 2.0.3's ``findChild(predicate, retry=True)`` takes no ``recursive``
+    argument, so scan the single-shot ``applications()`` snapshot instead.
     """
-    find_child = getattr(tree.root, "findChild", None)
-    if find_child is None:
-        return None
     try:
-        return find_child(
-            lambda n: (getattr(n, "name", "") or "").strip("'\" ") == name,
-            recursive=False,
-            retry=False,
-        )
+        for app in tree.root.applications():
+            if (getattr(app, "name", "") or "").strip("'\" ") == name:
+                return app
     except Exception:  # noqa: BLE001
         return None
+    return None
 
 
 def _wait_for_app_to_close(app_names: tuple[str, ...], label: str) -> None:

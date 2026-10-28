@@ -50,12 +50,13 @@ def _files_app_no_retry(name: str):
 
     ``tree.root.application(name)`` retries internally, so calling it per alias
     inside a poll loop multiplies the caller's timeout when Files is absent.
+    dogtail 2.0.3's ``findChild(predicate, retry=True)`` takes no ``recursive``
+    argument, so scan the single-shot ``applications()`` snapshot instead.
     """
-    return tree.root.findChild(
-        lambda n: (getattr(n, "name", "") or "").strip("'\" ") == name,
-        recursive=False,
-        retry=False,
-    )
+    for app in tree.root.applications():
+        if (getattr(app, "name", "") or "").strip("'\" ") == name:
+            return app
+    raise LookupError(f"application {name!r} not found in the AT-SPI tree")
 
 
 def _nautilus_app(timeout: int = 15):

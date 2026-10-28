@@ -29,8 +29,13 @@ uses a single-shot application snapshot (`tree.root.applications()`) and no-rais
 `findChildren` discovery; `tree.root.application(name)` has its own default retries,
 so calling it for every alias inside a poll loop multiplies the declared timeout.
 When a per-name fallback is needed inside a loop (the close waiters and
-`_nautilus_app()`), use `tree.root.findChild(pred, recursive=False, retry=False)`
-instead, so a missing app fails each attempt immediately.
+`_nautilus_app()`), match the name against that same `tree.root.applications()`
+snapshot so a missing app fails each attempt immediately. Do not pass
+`recursive=False` to `findChild`: dogtail 2.0.3's signature is
+`findChild(predicate, retry=True)`, so the call raises `TypeError`, and a
+`try`/`except` around it turns that into a silent "app closed" pass. Unit tests
+for these lookups need a fake root with the real signature (no `**kwargs`); a
+`MagicMock` accepts any keyword and hides the error.
 
 **Standalone app lookup pattern:**
 

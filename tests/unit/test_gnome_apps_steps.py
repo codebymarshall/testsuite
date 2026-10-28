@@ -7,6 +7,39 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 
+class _Dogtail203Root:
+    """``tree.root`` with dogtail 2.0.3's real lookup signatures (no ``**kwargs``).
+
+    A MagicMock accepts any keyword, so it hid ``findChild(..., recursive=False)``
+    raising ``TypeError`` on the VMs (#1036 review).
+    """
+
+    def __init__(self, apps=()):
+        self.apps = list(apps)
+        self.application_calls = []
+
+    def applications(self):
+        return list(self.apps)
+
+    def application(self, name):
+        self.application_calls.append(name)
+        raise LookupError(name)
+
+    def findChild(self, predicate, retry=True):  # noqa: N802 - dogtail API
+        for app in self.apps:
+            if predicate(app):
+                return app
+        raise LookupError("child not found")
+
+    def findChildren(self, predicate):  # noqa: N802 - dogtail API
+        return [app for app in self.apps if predicate(app)]
+
+
+def _visible_app(name):
+    frame = types.SimpleNamespace(roleName="frame", showing=True)
+    return types.SimpleNamespace(name=name, findChildren=lambda pred: [frame] if pred(frame) else [])
+
+
 # ---------------------------------------------------------------------------
 # Import helper
 # ---------------------------------------------------------------------------
@@ -399,25 +432,28 @@ class TestWaitForAppToCloseBudget:
         monkeypatch.setattr(m, "sleep", advance)
         m.tree.root.applications = MagicMock()  # registry unavailable: fall back to per-name lookup
         m.tree.root.application.side_effect = retrying_application
-        m.tree.root.findChild.return_value = None
 
         m._wait_for_app_to_close(m.FILES_APP_NAMES, "Files")
 
         assert clock.now == 100.0
         m.tree.root.application.assert_not_called()
-        assert m.tree.root.findChild.call_count == len(m.FILES_APP_NAMES)
-        for call in m.tree.root.findChild.call_args_list:
-            assert call.kwargs == {"recursive": False, "retry": False}
+        m.tree.root.findChild.assert_not_called()
 
-    def test_visible_app_still_blocks_close(self, monkeypatch):
+    def test_visible_app_still_blocks_close_with_dogtail_203_signatures(self, monkeypatch):
         m = _import_gnome_apps()
         monkeypatch.setattr(m, "sleep", lambda _s: None)
-        frame = types.SimpleNamespace(roleName="frame", showing=True)
-        app = MagicMock()
-        app.findChildren.side_effect = lambda pred: [frame] if pred(frame) else []
-        m.tree.root.applications = MagicMock()
-        m.tree.root.findChild.return_value = app
+        root = _Dogtail203Root([_visible_app("Files")])
+        monkeypatch.setattr(m, "tree", types.SimpleNamespace(root=root))
 
         with pytest.raises(AssertionError, match="Files is still visible"):
             m._wait_for_app_to_close(m.FILES_APP_NAMES, "Files")
-        m.tree.root.application.assert_not_called()
+        assert root.application_calls == []
+
+    def test_closed_app_returns_with_dogtail_203_signatures(self, monkeypatch):
+        m = _import_gnome_apps()
+        monkeypatch.setattr(m, "sleep", lambda _s: None)
+        root = _Dogtail203Root([])
+        monkeypatch.setattr(m, "tree", types.SimpleNamespace(root=root))
+
+        m._wait_for_app_to_close(m.FILES_APP_NAMES, "Files")
+        assert root.application_calls == []
